@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Levenshtein Edit Distance String Tool</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  .cell-ins  { background: #dcfce7; color: #166534; }
+  .cell-del  { background: #fee2e2; color: #991b1b; }
+  .cell-sub  { background: #fef9c3; color: #854d0e; }
+  .cell-mat  { background: #ede9fe; color: #5b21b6; }
+  .cell-path { outline: 2px solid #6366f1; outline-offset: -2px; }
+</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+<div class="max-w-2xl mx-auto p-4">
+  <h1 class="text-2xl font-bold text-gray-800 mb-1">Levenshtein Edit Distance</h1>
+  <p class="text-gray-500 text-sm mb-4">Visualize the dynamic programming matrix and optimal edit path</p>
+
+  <!-- Inputs -->
+  <section aria-labelledby="input-heading" class="bg-white rounded-xl shadow p-5 mb-4">
+    <h2 id="input-heading" class="text-lg font-semibold text-gray-700 mb-3">Strings to Compare</h2>
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label for="str-a" class="block text-sm font-medium text-gray-600 mb-1">String A (source)</label>
+        <input id="str-a" type="text" value="kitten" maxlength="20" class="w-full border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400" aria-label="Source string A">
+      </div>
+      <div>
+        <label for="str-b" class="block text-sm font-medium text-gray-600 mb-1">String B (target)</label>
+        <input id="str-b" type="text" value="sitting" maxlength="20" class="w-full border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400" aria-label="Target string B">
+      </div>
+    </div>
+    <p class="text-xs text-gray-400 mt-1">Maximum 20 characters per string for display</p>
+    <button id="calc-btn" class="mt-3 w-full py-2 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">Calculate & Visualize</button>
+  </section>
+
+  <!-- Summary -->
+  <section id="summary-section" aria-labelledby="summary-heading" class="bg-white rounded-xl shadow p-4 mb-4 hidden">
+    <h2 id="summary-heading" class="text-lg font-semibold text-gray-700 mb-3">Results</h2>
+    <div class="grid grid-cols-3 gap-3">
+      <div class="bg-indigo-50 rounded-lg p-3 text-center">
+        <p class="text-xs text-indigo-500 font-medium">Edit Distance</p>
+        <p id="res-dist" class="text-3xl font-bold text-indigo-700">0</p>
+      </div>
+      <div class="bg-green-50 rounded-lg p-3 text-center">
+        <p class="text-xs text-green-500 font-medium">Similarity</p>
+        <p id="res-sim" class="text-3xl font-bold text-green-700">100%</p>
+      </div>
+      <div class="bg-gray-50 rounded-lg p-3 text-center">
+        <p class="text-xs text-gray-500 font-medium">Max Length</p>
+        <p id="res-maxlen" class="text-3xl font-bold text-gray-700">0</p>
+      </div>
+    </div>
+    <!-- Edit operations breakdown -->
+    <div class="mt-3 flex gap-2 flex-wrap text-xs">
+      <span class="px-2 py-1 rounded cell-ins font-medium">Insertions: <span id="count-ins">0</span></span>
+      <span class="px-2 py-1 rounded cell-del font-medium">Deletions: <span id="count-del">0</span></span>
+      <span class="px-2 py-1 rounded cell-sub font-medium">Substitutions: <span id="count-sub">0</span></span>
+      <span class="px-2 py-1 rounded cell-mat font-medium">Matches: <span id="count-mat">0</span></span>
+    </div>
+    <!-- Edit sequence -->
+    <div class="mt-3">
+      <p class="text-xs font-medium text-gray-600 mb-1">Edit Sequence (A → B):</p>
+      <div id="edit-sequence" class="font-mono text-xs flex flex-wrap gap-1" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <!-- Matrix -->
+  <section id="matrix-section" aria-labelledby="matrix-heading" class="bg-white rounded-xl shadow p-4 hidden">
+    <h2 id="matrix-heading" class="text-lg font-semibold text-gray-700 mb-2">DP Matrix</h2>
+    <p class="text-xs text-gray-400 mb-2">Highlighted cells show the optimal edit path</p>
+    <div class="flex gap-3 flex-wrap text-xs mb-2">
+      <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 cell-ins rounded"></span>Insert</span>
+      <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 cell-del rounded"></span>Delete</span>
+      <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 cell-sub rounded"></span>Substitute</span>
+      <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 cell-mat rounded"></span>Match</span>
+    </div>
+    <div class="overflow-auto">
+      <table id="dp-table" class="text-xs border-collapse" aria-label="Levenshtein dynamic programming matrix"></table>
+    </div>
+  </section>
+</div>
+
+<script>
+function escapeHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({length:m+1}, (_,i) => Array.from({length:n+1}, (_,j) => i===0?j:j===0?i:0));
+  for (let i=1; i<=m; i++) {
+    for (let j=1; j<=n; j++) {
+      if (a[i-1] === b[j-1]) dp[i][j] = dp[i-1][j-1];
+      else dp[i][j] = 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+    }
+  }
+  return dp;
+}
+
+function traceback(dp, a, b) {
+  let i = a.length, j = b.length;
+  const path = new Set();
+  const ops = [];
+  path.add(i + ',' + j);
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && a[i-1] === b[j-1]) {
+      ops.unshift({type:'match', char:a[i-1]});
+      i--; j--;
+    } else if (j > 0 && (i === 0 || dp[i][j-1] <= dp[i-1][j] && dp[i][j-1] <= dp[i-1][j-1])) {
+      ops.unshift({type:'insert', char:b[j-1]});
+      j--;
+    } else if (i > 0 && (j === 0 || dp[i-1][j] <= dp[i][j-1] && dp[i-1][j] <= dp[i-1][j-1])) {
+      ops.unshift({type:'delete', char:a[i-1]});
+      i--;
+    } else {
+      ops.unshift({type:'substitute', from:a[i-1], to:b[j-1]});
+      i--; j--;
+    }
+    path.add(i + ',' + j);
+  }
+  return {path, ops};
+}
+
+function calculate() {
+  const a = document.getElementById('str-a').value;
+  const b = document.getElementById('str-b').value;
+
+  if (a === '' && b === '') {
+    document.getElementById('summary-section').classList.add('hidden');
+    document.getElementById('matrix-section').classList.add('hidden');
+    return;
+  }
+
+  const dp = levenshtein(a, b);
+  const dist = dp[a.length][b.length];
+  const maxLen = Math.max(a.length, b.length, 1);
+  const sim = Math.round((1 - dist / maxLen) * 100);
+  const {path, ops} = traceback(dp, a, b);
+
+  document.getElementById('res-dist').textContent = dist;
+  document.getElementById('res-sim').textContent = sim + '%';
+  document.getElementById('res-maxlen').textContent = maxLen;
+
+  const counts = {insert:0, delete:0, substitute:0, match:0};
+  ops.forEach(op => counts[op.type]++);
+  document.getElementById('count-ins').textContent = counts.insert;
+  document.getElementById('count-del').textContent = counts.delete;
+  document.getElementById('count-sub').textContent = counts.substitute;
+  document.getElementById('count-mat').textContent = counts.match;
+
+  // Edit sequence chips
+  const seqDiv = document.getElementById('edit-sequence');
+  seqDiv.innerHTML = '';
+  ops.forEach(op => {
+    const chip = document.createElement('span');
+    chip.className = 'px-1.5 py-0.5 rounded border font-mono text-xs';
+    if (op.type === 'match') {
+      chip.className += ' cell-mat';
+      chip.textContent = op.char;
+    } else if (op.type === 'insert') {
+      chip.className += ' cell-ins';
+      chip.textContent = '+' + op.char;
+    } else if (op.type === 'delete') {
+      chip.className += ' cell-del';
+      chip.textContent = '-' + op.char;
+    } else {
+      chip.className += ' cell-sub';
+      chip.textContent = op.from + '→' + op.to;
+    }
+    seqDiv.appendChild(chip);
+  });
+
+  document.getElementById('summary-section').classList.remove('hidden');
+
+  // Build DP table
+  const table = document.getElementById('dp-table');
+  table.innerHTML = '';
+
+  // Header row: '' + b chars
+  const headerRow = document.createElement('tr');
+  ['', '', ...b.split('')].forEach((ch, ci) => {
+    const th = document.createElement('th');
+    th.className = 'border border-gray-200 w-8 h-8 text-center font-mono text-gray-500 bg-gray-50';
+    th.textContent = ch;
+    headerRow.appendChild(th);
+  });
+  table.appendChild(headerRow);
+
+  // Sub-header: column indices
+  const idxRow = document.createElement('tr');
+  ['', '', ...Array.from({length:b.length},(_,i)=>i)].forEach((v, ci) => {
+    const th = document.createElement('th');
+    th.className = 'border border-gray-200 w-8 h-8 text-center text-gray-400 text-xs bg-gray-50';
+    th.textContent = ci >= 2 ? v : '';
+    idxRow.appendChild(th);
+  });
+  table.appendChild(idxRow);
+
+  for (let i=0; i<=a.length; i++) {
+    const tr = document.createElement('tr');
+
+    // Row label: a char
+    const rowLabel = document.createElement('th');
+    rowLabel.className = 'border border-gray-200 w-8 h-8 text-center font-mono text-gray-500 bg-gray-50';
+    rowLabel.textContent = i === 0 ? '' : a[i-1];
+    tr.appendChild(rowLabel);
+
+    // Row index
+    const rowIdx = document.createElement('th');
+    rowIdx.className = 'border border-gray-200 w-8 h-8 text-center text-gray-400 text-xs bg-gray-50';
+    rowIdx.textContent = i;
+    tr.appendChild(rowIdx);
+
+    for (let j=0; j<=b.length; j++) {
+      const td = document.createElement('td');
+      td.className = 'border border-gray-100 w-8 h-8 text-center font-mono font-medium transition-colors';
+      td.textContent = dp[i][j];
+
+      const onPath = path.has(i + ',' + j);
+      if (onPath) {
+        td.classList.add('cell-path');
+        if (i===0||j===0) {
+          td.classList.add('bg-gray-200');
+        } else if (a[i-1]===b[j-1]) {
+          td.classList.add('cell-mat');
+        } else if (dp[i][j] === dp[i][j-1]+1) {
+          td.classList.add('cell-ins');
+        } else if (dp[i][j] === dp[i-1][j]+1) {
+          td.classList.add('cell-del');
+        } else {
+          td.classList.add('cell-sub');
+        }
+      }
+      tr.appendChild(td);
+    }
+    table.appendChild(tr);
+  }
+
+  document.getElementById('matrix-section').classList.remove('hidden');
+}
+
+document.getElementById('calc-btn').addEventListener('click', calculate);
+document.getElementById('str-a').addEventListener('keydown', e => { if (e.key==='Enter') calculate(); });
+document.getElementById('str-b').addEventListener('keydown', e => { if (e.key==='Enter') calculate(); });
+
+calculate();
+</script>
+</body>
+</html>
